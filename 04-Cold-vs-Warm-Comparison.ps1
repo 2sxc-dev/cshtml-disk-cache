@@ -12,7 +12,9 @@ New-Item -ItemType Directory -Force -Path ".\results" | Out-Null
 # Cold run
 .\Measure-Requests.ps1 `
   -Urls $urls `
+  -TouchWebConfigFirst `
   -TouchWebConfigEachRun `
+  -CleanFirst `
   -CleanEachRun `
   -Repeat 9 `
   -SaveCsv -CsvPath ".\results\cold-x9.csv"

@@ -5,10 +5,10 @@ param(
     # Optional: folder whose contents can be deleted before tests
     [string] $CleanPath = "C:\Projects\2sxc\2sxc-dnn\Website\App_Data\2sxc.bin\cshtml",
 
-    # If set, clean folder before the first run (after optional touch+keepalive)
+    # If set, clean folder before the first run (after optional touch+keepalive and before warmup)
     [switch] $CleanFirst,
 
-    # If set, clean folder before every run (after optional touch+keepalive)
+    # If set, clean folder before every run (after optional touch+keepalive and before warmup)
     [switch] $CleanEachRun,
 
     # Optional: path to web.config to touch for recycling the site/app
@@ -21,32 +21,41 @@ param(
     [switch] $TouchWebConfigEachRun,
 
     # Seconds to wait after touching web.config to allow recycle to begin
-    [int] $RecycleWaitSec = 5,
+    [int] $RecycleWaitSec = 15,
 
     # Call a keepalive endpoint after touching web.config and before cleaning
-    [switch] $CallKeepAlive,
+    [switch] $CallKeepAlive = $true,
 
     # KeepAlive endpoint URL
-    [string] $KeepAliveUrl = "https://2sxc-dnn.dnndev.me/keepalive.aspx",
+    [string] $KeepAliveUrl = "https://2sxc-dnn.dnndev.me/en-us/",
 
     # KeepAlive HTTP timeout (seconds)
     [int] $KeepAliveTimeoutSec = 30,
 
     # KeepAlive retries and delay
-    [int] $KeepAliveRetries = 3,
+    [int] $KeepAliveRetries = 10,
     [int] $KeepAliveDelayMs = 500,
 
     # Wait after keepalive (before cleaning)
-    [int] $PostKeepAliveWaitSec = 5,
+    [int] $PostKeepAliveWaitSec = 15,
 
     # Delete folder contents retry policy
-    [int] $DeleteMaxRetries = 100,
+    [int] $DeleteMaxRetries = 99,
     [int] $DeleteRetryDelayMs = 300,
+
+    # Optional, non-measured warmup request that runs before measured URLs
+    # Runs after touch+keepalive+delete, both before first run and before each run (if enabled)
+    [switch] $CallWarmUp = $true,
+    [string] $WarmUpUrl = "https://2sxc-dnn.dnndev.me/en-us/",
+    [int] $WarmUpTimeoutSec = 30,
+    [int] $WarmUpRetries = 10,
+    [int] $WarmUpDelayMs = 500,
+    [int] $PostWarmUpWaitMs = 10000,
 
     # Number of times to repeat the entire set of requests
     [int] $Repeat = 1,
 
-    # Delay between requests (milliseconds)
+    # Delay between measured requests (milliseconds)
     [int] $DelayMsBetweenRequests = 0,
 
     # Delay between runs (milliseconds)
@@ -102,9 +111,7 @@ function Invoke-KeepAlive {
             $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec
             $code = $resp.StatusCode
             Write-Host "KeepAlive attempt $i/$Retries returned HTTP $code"
-            if ($code -ge 200 -and $code -lt 500) {
-                return
-            }
+            if ($code -ge 200 -and $code -lt 500) { return }
         } catch {
             Write-Host "KeepAlive attempt $i/$Retries failed: $($_.Exception.Message)"
         }
@@ -113,6 +120,35 @@ function Invoke-KeepAlive {
         }
     }
     Write-Warning "KeepAlive did not succeed after $Retries attempt(s). Continuing."
+}
+
+function Invoke-WarmUp {
+    param(
+        [string] $Url,
+        [int] $TimeoutSec = 30,
+        [int] $Retries = 3,
+        [int] $DelayMs = 500,
+        [int] $PostWaitMs = 0
+    )
+    if ([string]::IsNullOrWhiteSpace($Url)) { return }
+
+    for ($i = 1; $i -le $Retries; $i++) {
+        try {
+            $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec
+            $code = $resp.StatusCode
+            Write-Host "WarmUp attempt $i/$Retries returned HTTP $code"
+            if ($code -ge 200 -and $code -lt 500) {
+                if ($PostWaitMs -gt 0) { Start-Sleep -Milliseconds $PostWaitMs }
+                return
+            }
+        } catch {
+            Write-Host "WarmUp attempt $i/$Retries failed: $($_.Exception.Message)"
+        }
+        if ($i -lt $Retries -and $DelayMs -gt 0) {
+            Start-Sleep -Milliseconds $DelayMs
+        }
+    }
+    Write-Warning "WarmUp did not succeed after $Retries attempt(s). Continuing."
 }
 
 function Get-RemainingItemsCount {
@@ -146,36 +182,65 @@ function Clear-FolderContents {
         return
     }
 
-    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+    $offlinePath = $null
+    $offlineCreated = $false
+    $offlineDir = $null
+
+    if (-not [string]::IsNullOrWhiteSpace($script:WebConfigPath)) {
         try {
-            # Try to remove files first (bottom-up), then directories
-            $items = Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction SilentlyContinue |
-                     Sort-Object FullName -Descending
+            $offlineDir = Split-Path -Path $script:WebConfigPath -Parent
+        } catch { $offlineDir = $null }
+    }
+    # if ([string]::IsNullOrWhiteSpace($offlineDir)) {
+    #     $offlineDir = Split-Path -Path $Path -Parent
+    # }
 
-            foreach ($it in $items) {
-                try {
-                    Clear-AttributesIfNeeded -Item $it
-                    Remove-Item -LiteralPath $it.FullName -Force -Recurse -ErrorAction Stop
-                } catch {
-                    # Fallback: attempt with robocopy purge for directories if needed (optional)
-                    # Leave silent and let retry loop handle locked items
-                }
-            }
+    if (-not [string]::IsNullOrWhiteSpace($offlineDir)) {
+        $offlinePath = Join-Path -Path $offlineDir -ChildPath "app_offline.htm"
+        try {
+            "Application offline for maintenance." | Set-Content -Path $offlinePath -Encoding UTF8 -Force
+            $offlineCreated = $true
         } catch {
-            # Ignore and let retry loop continue
+            Write-Warning "Failed to create appoffline file '$offlinePath': $($_.Exception.Message)"
         }
+    }
 
-        $remaining = Get-RemainingItemsCount -Path $Path
-        if ($remaining -eq 0) {
-            Write-Host "Cleared folder contents: $Path"
-            return
+    try {
+        for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+            try {
+                $items = Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction SilentlyContinue |
+                         Sort-Object FullName -Descending
+                foreach ($it in $items) {
+                    try {
+                        Clear-AttributesIfNeeded -Item $it
+                        Remove-Item -LiteralPath $it.FullName -Force -Recurse -ErrorAction Stop
+                    } catch {
+                        # Let retry loop handle locked items
+                    }
+                }
+            } catch { }
+
+            $remaining = Get-RemainingItemsCount -Path $Path
+            if ($remaining -eq 0) {
+                Write-Host "Cleared folder contents: $Path"
+                return
+            }
+
+            if ($attempt -lt $MaxRetries) {
+                Write-Host "Retry delete ($attempt/$MaxRetries). Remaining items: $remaining. Waiting ${RetryDelayMs}ms..."
+                Start-Sleep -Milliseconds $RetryDelayMs
+            } else {
+                Write-Warning "Failed to delete all items after $MaxRetries attempt(s). Remaining items: $remaining"
+            }
         }
-
-        if ($attempt -lt $MaxRetries) {
-            Write-Host "Retry delete ($attempt/$MaxRetries). Remaining items: $remaining. Waiting ${RetryDelayMs}ms..."
-            Start-Sleep -Milliseconds $RetryDelayMs
-        } else {
-            Write-Warning "Failed to delete all items after $MaxRetries attempt(s). Remaining items: $remaining"
+    }
+    finally {
+        if ($offlineCreated -and $offlinePath -and (Test-Path -LiteralPath $offlinePath)) {
+            try {
+                Remove-Item -LiteralPath $offlinePath -Force -ErrorAction Stop
+            } catch {
+                Write-Warning "Failed to delete appoffline file '$offlinePath': $($_.Exception.Message)"
+            }
         }
     }
 }
@@ -192,7 +257,7 @@ if ($Urls.Count -eq 0) { throw "No URLs provided." }
 
 $allRows = New-Object System.Collections.Generic.List[object]
 
-# Optionally recycle and warm up before the first run, then clean with retries
+# ----- INITIAL PREP: touch -> keepalive -> wait -> delete -> warmup -----
 if ($TouchWebConfigFirst -and $WebConfigPath) {
     Touch-File -Path $WebConfigPath -WaitSeconds $RecycleWaitSec
     if ($CallKeepAlive -and $KeepAliveUrl) {
@@ -206,7 +271,11 @@ if ($TouchWebConfigFirst -and $WebConfigPath) {
 if ($CleanFirst -and $CleanPath) {
     Clear-FolderContents -Path $CleanPath -MaxRetries $DeleteMaxRetries -RetryDelayMs $DeleteRetryDelayMs
 }
+if ($CallWarmUp -and $WarmUpUrl) {
+    Invoke-WarmUp -Url $WarmUpUrl -TimeoutSec $WarmUpTimeoutSec -Retries $WarmUpRetries -DelayMs $WarmUpDelayMs -PostWaitMs $PostWarmUpWaitMs
+}
 
+# ----- RUNS -----
 for ($run = 1; $run -le $Repeat; $run++) {
 
     if ($run -gt 1) {
@@ -222,6 +291,9 @@ for ($run = 1; $run -le $Repeat; $run++) {
         }
         if ($CleanEachRun -and $CleanPath) {
             Clear-FolderContents -Path $CleanPath -MaxRetries $DeleteMaxRetries -RetryDelayMs $DeleteRetryDelayMs
+        }
+        if ($CallWarmUp -and $WarmUpUrl) {
+            Invoke-WarmUp -Url $WarmUpUrl -TimeoutSec $WarmUpTimeoutSec -Retries $WarmUpRetries -DelayMs $WarmUpDelayMs -PostWaitMs $PostWarmUpWaitMs
         }
     }
 
@@ -289,14 +361,15 @@ for ($run = 1; $run -le $Repeat; $run++) {
     }
 }
 
-# Print all results
+# ----- REPORTING -----
 Write-Host ""
 Write-Host "All request results:"
 $allRows | Select-Object Run, Url, Ok, Status, DurationMs, ContentLength |
     Sort-Object Run, Url |
     Format-Table -AutoSize
 
-# Summary by URL (average, min, max)
+Write-Host ""
+Write-Host "Summary by URL:"
 $summaryUrl =
     $allRows |
     Group-Object Url |
@@ -311,12 +384,10 @@ $summaryUrl =
             SuccessPct = [math]::Round( (100.0 * ($_.Group | Where-Object {$_.Ok}).Count / $_.Group.Count), 1)
         }
     } | Sort-Object Url
-
-Write-Host ""
-Write-Host "Summary by URL:"
 $summaryUrl | Format-Table -AutoSize
 
-# Summary by run (total duration)
+Write-Host ""
+Write-Host "Summary by run:"
 $summaryRun =
     $allRows |
     Group-Object Run |
@@ -328,9 +399,6 @@ $summaryRun =
             Count   = $_.Group.Count
         }
     } | Sort-Object Run
-
-Write-Host ""
-Write-Host "Summary by run:"
 $summaryRun | Format-Table -AutoSize
 
 # Save CSV if requested
