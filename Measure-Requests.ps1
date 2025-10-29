@@ -2,46 +2,35 @@ param(
     [Parameter(Mandatory=$true)]
     [string[]] $Urls,
 
-    # Folder koji se može isprazniti (samo sadržaj)
+    # Optional: folder whose contents can be deleted before tests
     [string] $CleanPath,
 
-    # Ako je zadano, briše sadržaj CleanPath prije prvog pokretanja
+    # If set, clean folder before the first run
     [switch] $CleanFirst,
 
-    # Ako je zadano, briše sadržaj CleanPath prije SVAKOG ponavljanja
+    # If set, clean folder before every run
     [switch] $CleanEachRun,
 
-    # Koliko puta ponoviti cijeli niz URL-ova
+    # Number of times to repeat the entire set of requests
     [int] $Repeat = 1,
 
-    # Pauza između pojedinih requestova (u milisekundama)
+    # Delay between requests (milliseconds)
     [int] $DelayMsBetweenRequests = 0,
 
-    # Pauza između ponavljanja seta (u milisekundama)
+    # Delay between runs (milliseconds)
     [int] $DelayMsBetweenRuns = 0,
 
-    # Timeout za HTTP request (sekunde)
+    # HTTP request timeout (seconds)
     [int] $TimeoutSec = 60,
 
-    # Spremi CSV log?
+    # Save results to a CSV file
     [switch] $SaveCsv,
 
-    # Put do CSV-a (ako nije zadano, kreira timestampirani u isti folder gdje se pokreće)
+    # CSV file path (optional; default = timestamped file in current folder)
     [string] $CsvPath
 )
 
-# Osiguraj UTF-8 output da se ispravno prikažu dijakritici i emoji
-try {
-    if ([Console]::OutputEncoding.CodePage -ne 65001) {
-        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-    }
-    if ($PSVersionTable.PSVersion.Major -lt 6 -and [Console]::InputEncoding.CodePage -ne 65001) {
-        [Console]::InputEncoding = [System.Text.Encoding]::UTF8
-    }
-    $OutputEncoding = [System.Text.Encoding]::UTF8
-} catch { }
-
-# --- Helper: osiguraj TLS 1.2+ na starijim PowerShell verzijama ---
+# Ensure TLS 1.2+ support
 try {
     [Net.ServicePointManager]::SecurityProtocol = `
         [Net.ServicePointManager]::SecurityProtocol `
@@ -53,31 +42,31 @@ function Clear-FolderContents {
     param([string] $Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return }
     if (-not (Test-Path -LiteralPath $Path)) {
-        Write-Host "⚠️  Ne postoji putanja: $Path"
+        Write-Host "Path does not exist: $Path"
         return
     }
     try {
         Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction SilentlyContinue |
             Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-        Write-Host "🧹 Očišćen sadržaj: $Path"
+        Write-Host "Cleared folder contents: $Path"
     } catch {
-        Write-Warning "Nisam uspio obrisati sadržaj '$Path': $($_.Exception.Message)"
+        Write-Warning "Failed to clear folder '$Path': $($_.Exception.Message)"
     }
 }
 
-# Priprema CSV-a
+# Prepare CSV path if saving
 if ($SaveCsv -and [string]::IsNullOrWhiteSpace($CsvPath)) {
     $stamp = (Get-Date).ToString("yyyyMMdd-HHmmss")
     $CsvPath = Join-Path -Path (Get-Location) -ChildPath "measure-requests-$stamp.csv"
 }
 
-# Validacija URL-ova
+# Validate URLs
 $Urls = $Urls | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() }
-if ($Urls.Count -eq 0) { throw "Niste zadali niti jedan URL." }
+if ($Urls.Count -eq 0) { throw "No URLs provided." }
 
 $allRows = New-Object System.Collections.Generic.List[object]
 
-# Po želji očisti prije prvog pokretanja
+# Optionally clean before the first run
 if ($CleanFirst -and $CleanPath) {
     Clear-FolderContents -Path $CleanPath
 }
@@ -89,7 +78,7 @@ for ($run = 1; $run -le $Repeat; $run++) {
     }
 
     Write-Host ""
-    Write-Host "▶️  Pokretanje #$run od $Repeat" -ForegroundColor Cyan
+    Write-Host "Run #$run of $Repeat"
 
     $runStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
@@ -102,11 +91,9 @@ for ($run = 1; $run -le $Repeat; $run++) {
         $errorMsg = $null
 
         try {
-            # PS5 ima UseBasicParsing, PS7 ga ignorira – ok je zadati
             $resp = Invoke-WebRequest -Uri $u -TimeoutSec $TimeoutSec -UseBasicParsing
             $reqSw.Stop()
 
-            # Pokušaj izvući status i duljinu sadržaja (ako postoji)
             try { $status = ($resp.StatusCode) } catch { $status = "" }
             try {
                 if ($resp.RawContentLength) { $contentLen = $resp.RawContentLength }
@@ -118,7 +105,6 @@ for ($run = 1; $run -le $Repeat; $run++) {
         catch {
             $reqSw.Stop()
             $errorMsg = $_.Exception.Message
-            # Ako je dostupno, pokušaj dohvatiti response status
             try {
                 if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
                     $status = [int]$_.Exception.Response.StatusCode
@@ -148,41 +134,41 @@ for ($run = 1; $run -le $Repeat; $run++) {
     }
 
     $runStopwatch.Stop()
-    Write-Host ("⏱️  Ukupno vrijeme za run #{0}: {1} ms" -f $run, [int]$runStopwatch.Elapsed.TotalMilliseconds)
+    Write-Host ("Total time for run #{0}: {1} ms" -f $run, [int]$runStopwatch.Elapsed.TotalMilliseconds)
 
     if ($run -lt $Repeat -and $DelayMsBetweenRuns -gt 0) {
         Start-Sleep -Milliseconds $DelayMsBetweenRuns
     }
 }
 
-# Ispis detalja
+# Print all results
 Write-Host ""
-Write-Host "Rezultati (svi requestovi):" -ForegroundColor Green
+Write-Host "All request results:"
 $allRows | Select-Object Run, Url, Ok, Status, DurationMs, ContentLength |
     Sort-Object Run, Url |
     Format-Table -AutoSize
 
-# Sažetak po URL-u (prosjek, min, max)
+# Summary by URL (average, min, max)
 $summaryUrl =
     $allRows |
     Group-Object Url |
     ForEach-Object {
-        $okDurations = $_.Group.DurationMs
+        $durations = $_.Group.DurationMs
         [PSCustomObject]@{
             Url        = $_.Name
             Count      = $_.Group.Count
-            AvgMs      = [math]::Round( ($okDurations | Measure-Object -Average).Average, 2)
-            MinMs      = ($okDurations | Measure-Object -Minimum).Minimum
-            MaxMs      = ($okDurations | Measure-Object -Maximum).Maximum
+            AvgMs      = [math]::Round( ($durations | Measure-Object -Average).Average, 2)
+            MinMs      = ($durations | Measure-Object -Minimum).Minimum
+            MaxMs      = ($durations | Measure-Object -Maximum).Maximum
             SuccessPct = [math]::Round( (100.0 * ($_.Group | Where-Object {$_.Ok}).Count / $_.Group.Count), 1)
         }
     } | Sort-Object Url
 
 Write-Host ""
-Write-Host "Sažetak po URL-u:" -ForegroundColor Green
+Write-Host "Summary by URL:"
 $summaryUrl | Format-Table -AutoSize
 
-# Sažetak po run-u (ukupno vrijeme po pokretanju)
+# Summary by run (total duration)
 $summaryRun =
     $allRows |
     Group-Object Run |
@@ -196,16 +182,16 @@ $summaryRun =
     } | Sort-Object Run
 
 Write-Host ""
-Write-Host "Sažetak po run-u:" -ForegroundColor Green
+Write-Host "Summary by run:"
 $summaryRun | Format-Table -AutoSize
 
-# Spremi CSV ako je traženo
+# Save CSV if requested
 if ($SaveCsv) {
     try {
         $allRows | Export-Csv -Path $CsvPath -NoTypeInformation -Encoding UTF8
         Write-Host ""
-        Write-Host "💾 CSV spremljen: $CsvPath" -ForegroundColor Yellow
+        Write-Host "CSV saved to: $CsvPath"
     } catch {
-        Write-Warning "Nisam uspio spremiti CSV: $($_.Exception.Message)"
+        Write-Warning "Failed to save CSV: $($_.Exception.Message)"
     }
 }
