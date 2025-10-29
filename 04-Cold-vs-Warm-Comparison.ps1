@@ -1,10 +1,11 @@
 #Requires -Version 5.1
 $urls = @(
-  "https://2sxc-dnn.dnndev.me/en-us/",
   "https://2sxc-dnn.dnndev.me/en-us/p1",
   "https://2sxc-dnn.dnndev.me/en-us/p2",
   "https://2sxc-dnn.dnndev.me/en-us/p3",
   "https://2sxc-dnn.dnndev.me/en-us/p4"
+  "https://2sxc-dnn.dnndev.me/en-us/p5",
+  "https://2sxc-dnn.dnndev.me/en-us/p6"
 )
 
 New-Item -ItemType Directory -Force -Path ".\results" | Out-Null
@@ -13,9 +14,11 @@ New-Item -ItemType Directory -Force -Path ".\results" | Out-Null
 .\Measure-Requests.ps1 `
   -Urls $urls `
   -TouchWebConfigFirst `
-  -TouchWebConfigEachRun `
   -CleanFirst `
+  -StopAppPoolForCleanFirst `
+  -TouchWebConfigEachRun `
   -CleanEachRun `
+  -StopAppPoolForCleanEachRun `
   -Repeat 9 `
   -SaveCsv -CsvPath ".\results\cold-x9.csv"
 
@@ -25,6 +28,7 @@ Start-Sleep -Seconds 2
 # Disk runs
 .\Measure-Requests.ps1 `
   -Urls $urls `
+  -TouchWebConfigFirst `
   -TouchWebConfigEachRun `
   -Repeat 9 `
   -SaveCsv -CsvPath ".\results\disk-x9.csv"

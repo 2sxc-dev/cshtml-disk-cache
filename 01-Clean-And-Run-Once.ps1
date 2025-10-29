@@ -16,6 +16,7 @@ New-Item -ItemType Directory -Force -Path (Split-Path $csv) | Out-Null
   -Urls $urls `
   -TouchWebConfigFirst `
   -CleanFirst `
+  -StopAppPoolForCleanFirst `
   -Repeat 1 `
   -SaveCsv `
   -CsvPath $csv

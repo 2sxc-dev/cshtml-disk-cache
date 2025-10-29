@@ -1,0 +1,69 @@
+<!DOCTYPE html><html><head><meta charset='utf-8'><title>Test Results (Manual Input)</title>
+<style>
+table { border-collapse: collapse; font-family: Arial, sans-serif; font-size: 14px; }
+th, td { border: 1px solid #444; padding: 6px 10px; }
+th { background: #f0f0f0; }
+caption { text-align: left; font-weight: bold; margin: 12px 0 6px; }
+tfoot td { font-weight: bold; background: #fafafa; }
+.section { margin-top: 18px; }
+.url { text-align: left; }
+.num { text-align: right; }
+</style></head><body>
+<div class="section">
+<caption>COLD</caption>
+<table>
+<thead><tr><th>URL</th><th>Min od DurationMs</th><th>Prosjek od DurationMs</th><th>Max od DurationMs</th></tr></thead>
+<tbody>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p1</td><td class="num">7196</td><td class="num">7513</td><td class="num">7964</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p2</td><td class="num">3846</td><td class="num">4530</td><td class="num">8579</td></tr>
+<tr><td class="url">https://2sxc-dnndev.me/en-us/p3</td><td class="num">1060</td><td class="num">1176</td><td class="num">1409</td></tr>
+<tr><td class="url">https://2sxc-dnndev.me/en-us/p4</td><td class="num">1596</td><td class="num">1697</td><td class="num">2148</td></tr>
+<tr><td class="url">https://2sxc-dnndev.me/en-us/p5</td><td class="num">1495</td><td class="num">1586</td><td class="num">1742</td></tr>
+<tr><td class="url">https://2sxc-dnndev.me/en-us/p6</td><td class="num">1941</td><td class="num">2099</td><td class="num">2505</td></tr>
+</tbody>
+<tfoot><tr><td class="url">Ukupni zbroj</td><td class="num">1060</td><td class="num">3100</td><td class="num">8579</td></tr></tfoot>
+</table>
+</div>
+<div class="section">
+<caption>DISK</caption>
+<table>
+<thead><tr><th>URL</th><th>Min od DurationMs</th><th>Prosjek od DurationMs</th><th>Max od DurationMs</th></tr></thead>
+<tbody>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p1</td><td class="num">688</td><td class="num">827</td><td class="num">1213</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p2</td><td class="num">260</td><td class="num">346</td><td class="num">627</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p3</td><td class="num">102</td><td class="num">134</td><td class="num">198</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p4</td><td class="num">144</td><td class="num">196</td><td class="num">265</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p5</td><td class="num">97</td><td class="num">136</td><td class="num">235</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p6</td><td class="num">458</td><td class="num">529</td><td class="num">675</td></tr>
+</tbody>
+<tfoot><tr><td class="url">Ukupni zbroj</td><td class="num">97</td><td class="num">361</td><td class="num">1213</td></tr></tfoot>
+</table>
+</div>
+<div class="section">
+<caption>MEMORY</caption>
+<table>
+<thead><tr><th>URL</th><th>Min od DurationMs</th><th>Prosjek od DurationMs</th><th>Max od DurationMs</th></tr></thead>
+<tbody>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p1</td><td class="num">35</td><td class="num">37</td><td class="num">42</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p2</td><td class="num">65</td><td class="num">71</td><td class="num">95</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p3</td><td class="num">36</td><td class="num">38</td><td class="num">41</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p4</td><td class="num">66</td><td class="num">76</td><td class="num">108</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p5</td><td class="num">39</td><td class="num">41</td><td class="num">47</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p6</td><td class="num">149</td><td class="num">161</td><td class="num">196</td></tr>
+</tbody>
+<tfoot><tr><td class="url">Ukupni zbroj</td><td class="num">35</td><td class="num">71</td><td class="num">196</td></tr></tfoot>
+</table>
+</div>
+<div class="section">
+<caption>Omjeri (COLD = 100%)</caption>
+<table>
+<thead><tr><th>URL</th><th>COLD</th><th>DISK/COLD</th><th>MEMORY/COLD</th></tr></thead>
+<tbody>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p1</td><td class="num">100%</td><td class="num">11,0%</td><td class="num">0,5%</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p2</td><td class="num">100%</td><td class="num">7,6%</td><td class="num">1,1%</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p3</td><td class="num">100%</td><td class="num">11,4%</td><td class="num">2,9%</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p4</td><td class="num">100%</td><td class="num">11,5%</td><td class="num">5,0%</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p5</td><td class="num">100%</td><td class="num">8,6%</td><td class="num">2,7%</td></tr>
+<tr><td class="url">https://2sxc-dnn.dnndev.me/en-us/p6</td><td class="num">100%</td><td class="num">25,2%</td><td class="num">7,8%</td></tr>
+</tbody></table></div>
+</body></html>

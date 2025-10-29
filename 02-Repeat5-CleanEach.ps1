@@ -14,11 +14,11 @@ $csv   = ".\results\repeat5-clean-each.csv"
 New-Item -ItemType Directory -Force -Path (Split-Path $csv) | Out-Null
 
 .\Measure-Requests.ps1 `
-  -Urls $urls `
-  -CleanPath $clean `
+  -TouchWebConfigFirst `
+  -CleanFirst `
+  -StopAppPoolForCleanFirst `
+  -TouchWebConfigEachRun `
   -CleanEachRun `
+  -StopAppPoolForCleanEachRun `
   -Repeat 5 `
-  -DelayMsBetweenRequests 250 `
-  -DelayMsBetweenRuns 1000 `
-  -TimeoutSec 60 `
   -SaveCsv -CsvPath $csv
