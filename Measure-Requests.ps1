@@ -3,13 +3,45 @@ param(
     [string[]] $Urls,
 
     # Optional: folder whose contents can be deleted before tests
-    [string] $CleanPath,
+    [string] $CleanPath = "C:\Projects\2sxc\2sxc-dnn\Website\App_Data\2sxc.bin\cshtml",
 
-    # If set, clean folder before the first run
+    # If set, clean folder before the first run (after optional touch+keepalive)
     [switch] $CleanFirst,
 
-    # If set, clean folder before every run
+    # If set, clean folder before every run (after optional touch+keepalive)
     [switch] $CleanEachRun,
+
+    # Optional: path to web.config to touch for recycling the site/app
+    [string] $WebConfigPath = "C:\Projects\2sxc\2sxc-dnn\Website\web.config",
+
+    # If set, touch web.config before the first run (recycle IIS/DNN)
+    [switch] $TouchWebConfigFirst,
+
+    # If set, touch web.config before every run (recycle IIS/DNN)
+    [switch] $TouchWebConfigEachRun,
+
+    # Seconds to wait after touching web.config to allow recycle to begin
+    [int] $RecycleWaitSec = 5,
+
+    # Call a keepalive endpoint after touching web.config and before cleaning
+    [switch] $CallKeepAlive,
+
+    # KeepAlive endpoint URL
+    [string] $KeepAliveUrl = "https://2sxc-dnn.dnndev.me/keepalive.aspx",
+
+    # KeepAlive HTTP timeout (seconds)
+    [int] $KeepAliveTimeoutSec = 30,
+
+    # KeepAlive retries and delay
+    [int] $KeepAliveRetries = 3,
+    [int] $KeepAliveDelayMs = 500,
+
+    # Wait after keepalive (before cleaning)
+    [int] $PostKeepAliveWaitSec = 5,
+
+    # Delete folder contents retry policy
+    [int] $DeleteMaxRetries = 100,
+    [int] $DeleteRetryDelayMs = 300,
 
     # Number of times to repeat the entire set of requests
     [int] $Repeat = 1,
@@ -20,7 +52,7 @@ param(
     # Delay between runs (milliseconds)
     [int] $DelayMsBetweenRuns = 0,
 
-    # HTTP request timeout (seconds)
+    # HTTP request timeout (seconds) for measured requests
     [int] $TimeoutSec = 60,
 
     # Save results to a CSV file
@@ -38,19 +70,113 @@ try {
         -bor [Net.SecurityProtocolType]::Tls13
 } catch { }
 
-function Clear-FolderContents {
+function Touch-File {
+    param([string] $Path, [int] $WaitSeconds = 0)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Write-Warning "web.config not found: $Path"
+        return
+    }
+    try {
+        [System.IO.File]::SetLastWriteTimeUtc($Path, [DateTime]::UtcNow)
+        Write-Host "Touched web.config: $Path"
+        if ($WaitSeconds -gt 0) {
+            Start-Sleep -Seconds $WaitSeconds
+        }
+    } catch {
+        Write-Warning "Failed to touch web.config '$Path': $($_.Exception.Message)"
+    }
+}
+
+function Invoke-KeepAlive {
+    param(
+        [string] $Url,
+        [int] $TimeoutSec = 30,
+        [int] $Retries = 3,
+        [int] $DelayMs = 500
+    )
+    if ([string]::IsNullOrWhiteSpace($Url)) { return }
+
+    for ($i = 1; $i -le $Retries; $i++) {
+        try {
+            $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec
+            $code = $resp.StatusCode
+            Write-Host "KeepAlive attempt $i/$Retries returned HTTP $code"
+            if ($code -ge 200 -and $code -lt 500) {
+                return
+            }
+        } catch {
+            Write-Host "KeepAlive attempt $i/$Retries failed: $($_.Exception.Message)"
+        }
+        if ($i -lt $Retries -and $DelayMs -gt 0) {
+            Start-Sleep -Milliseconds $DelayMs
+        }
+    }
+    Write-Warning "KeepAlive did not succeed after $Retries attempt(s). Continuing."
+}
+
+function Get-RemainingItemsCount {
     param([string] $Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return 0 }
+    try {
+        return (Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction SilentlyContinue | Measure-Object).Count
+    } catch {
+        return -1
+    }
+}
+
+function Clear-AttributesIfNeeded {
+    param([System.IO.FileSystemInfo] $Item)
+    try {
+        if ($Item.Attributes -band [System.IO.FileAttributes]::ReadOnly) {
+            $Item.Attributes = $Item.Attributes -bxor [System.IO.FileAttributes]::ReadOnly
+        }
+    } catch { }
+}
+
+function Clear-FolderContents {
+    param(
+        [string] $Path,
+        [int] $MaxRetries = 10,
+        [int] $RetryDelayMs = 300
+    )
     if ([string]::IsNullOrWhiteSpace($Path)) { return }
     if (-not (Test-Path -LiteralPath $Path)) {
         Write-Host "Path does not exist: $Path"
         return
     }
-    try {
-        Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction SilentlyContinue |
-            Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-        Write-Host "Cleared folder contents: $Path"
-    } catch {
-        Write-Warning "Failed to clear folder '$Path': $($_.Exception.Message)"
+
+    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+        try {
+            # Try to remove files first (bottom-up), then directories
+            $items = Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction SilentlyContinue |
+                     Sort-Object FullName -Descending
+
+            foreach ($it in $items) {
+                try {
+                    Clear-AttributesIfNeeded -Item $it
+                    Remove-Item -LiteralPath $it.FullName -Force -Recurse -ErrorAction Stop
+                } catch {
+                    # Fallback: attempt with robocopy purge for directories if needed (optional)
+                    # Leave silent and let retry loop handle locked items
+                }
+            }
+        } catch {
+            # Ignore and let retry loop continue
+        }
+
+        $remaining = Get-RemainingItemsCount -Path $Path
+        if ($remaining -eq 0) {
+            Write-Host "Cleared folder contents: $Path"
+            return
+        }
+
+        if ($attempt -lt $MaxRetries) {
+            Write-Host "Retry delete ($attempt/$MaxRetries). Remaining items: $remaining. Waiting ${RetryDelayMs}ms..."
+            Start-Sleep -Milliseconds $RetryDelayMs
+        } else {
+            Write-Warning "Failed to delete all items after $MaxRetries attempt(s). Remaining items: $remaining"
+        }
     }
 }
 
@@ -66,15 +192,37 @@ if ($Urls.Count -eq 0) { throw "No URLs provided." }
 
 $allRows = New-Object System.Collections.Generic.List[object]
 
-# Optionally clean before the first run
+# Optionally recycle and warm up before the first run, then clean with retries
+if ($TouchWebConfigFirst -and $WebConfigPath) {
+    Touch-File -Path $WebConfigPath -WaitSeconds $RecycleWaitSec
+    if ($CallKeepAlive -and $KeepAliveUrl) {
+        Invoke-KeepAlive -Url $KeepAliveUrl -TimeoutSec $KeepAliveTimeoutSec -Retries $KeepAliveRetries -DelayMs $KeepAliveDelayMs
+        if ($PostKeepAliveWaitSec -gt 0) {
+            Write-Host "Waiting $PostKeepAliveWaitSec seconds after KeepAlive..."
+            Start-Sleep -Seconds $PostKeepAliveWaitSec
+        }
+    }
+}
 if ($CleanFirst -and $CleanPath) {
-    Clear-FolderContents -Path $CleanPath
+    Clear-FolderContents -Path $CleanPath -MaxRetries $DeleteMaxRetries -RetryDelayMs $DeleteRetryDelayMs
 }
 
 for ($run = 1; $run -le $Repeat; $run++) {
 
-    if ($run -gt 1 -and $CleanEachRun -and $CleanPath) {
-        Clear-FolderContents -Path $CleanPath
+    if ($run -gt 1) {
+        if ($TouchWebConfigEachRun -and $WebConfigPath) {
+            Touch-File -Path $WebConfigPath -WaitSeconds $RecycleWaitSec
+            if ($CallKeepAlive -and $KeepAliveUrl) {
+                Invoke-KeepAlive -Url $KeepAliveUrl -TimeoutSec $KeepAliveTimeoutSec -Retries $KeepAliveRetries -DelayMs $KeepAliveDelayMs
+                if ($PostKeepAliveWaitSec -gt 0) {
+                    Write-Host "Waiting $PostKeepAliveWaitSec seconds after KeepAlive..."
+                    Start-Sleep -Seconds $PostKeepAliveWaitSec
+                }
+            }
+        }
+        if ($CleanEachRun -and $CleanPath) {
+            Clear-FolderContents -Path $CleanPath -MaxRetries $DeleteMaxRetries -RetryDelayMs $DeleteRetryDelayMs
+        }
     }
 
     Write-Host ""
