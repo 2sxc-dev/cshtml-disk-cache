@@ -30,7 +30,7 @@ Start-Sleep -Seconds 2
   -Urls $urls `
   -TouchWebConfigFirst `
   -TouchWebConfigEachRun `
-  -Repeat 1 `
+  -Repeat 9 `
   -SaveCsv -CsvPath ".\results\05-disk-XPS5.csv"
 
   # Short pause
