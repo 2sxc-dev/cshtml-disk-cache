@@ -3,7 +3,7 @@ param(
     [string[]] $Urls,
 
     # Paths and defaults
-    [string] $CleanPath = "A:\2sxc\2sxc-dnn\Website\App_Data\2sxc.bin\cshtml",
+    [string] $CleanPath = "A:\2sxc\2sxc-dnn\Website\App_Data\2sxc.bin.cshtml",
     [string] $WebConfigPath = "A:\2sxc\2sxc-dnn\Website\web.config",
     [string] $KeepAliveUrl = "https://2sxc-dnn.dnndev.me/keepalive.aspx",
     [string] $WarmUpUrl = "https://2sxc-dnn.dnndev.me/",
